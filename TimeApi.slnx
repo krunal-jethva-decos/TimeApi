@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TimeApi/TimeApi.csproj" />
+  <Project Path="TimeShared/TimeShared.csproj" />
+</Solution>

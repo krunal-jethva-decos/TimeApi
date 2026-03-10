@@ -1,0 +1,118 @@
+@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using TimeShared
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>SignalR Hubs (Blazor)</PageTitle>
+
+<div>
+    <h1>Global Time</h1>
+    <p>Status: @(IsTimeConnected ? "Connected" : "Disconnected")</p>
+    <h2>@formattedTime</h2>
+    <p>Hub: /timehub</p>
+
+    <hr />
+
+    <h1>Role-Specific Data</h1>
+    <p>Status: @(IsRoleConnected ? "Connected" : "Disconnected")</p>
+    
+    <div>
+        <label>Select Your Role:</label>
+        <select @onchange="OnRoleChanged" disabled="@isConnecting">
+            <option value="Guest">Guest</option>
+            <option value="Admin">Admin</option>
+            <option value="Manager">Manager</option>
+            <option value="User">User</option>
+        </select>
+    </div>
+
+    @if (roleData == null)
+    {
+        <p>Waiting for role data...</p>
+    }
+    else
+    {
+        <h3>Data for: @selectedRole</h3>
+        <pre>@roleDataJson</pre>
+        <p><strong>Role:</strong> @(roleData?.Role)</p>
+        <p><strong>Message:</strong> @(roleData?.Message)</p>
+    }
+</div>
+
+@code {
+    private HubConnection? timeHub;
+    private HubConnection? roleHub;
+    
+    private string? formattedTime = "--:--:--";
+    private string selectedRole = "Guest";
+    private RoleDataResponse? roleData;
+    private string? roleDataJson;
+    private bool isConnecting = false;
+
+    private string baseApiUrl = "https://localhost:7033";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ConnectTimeHub();
+        await ConnectRoleHub();
+    }
+
+    private async Task ConnectTimeHub()
+    {
+        timeHub = new HubConnectionBuilder()
+            .WithUrl($"{baseApiUrl}/timehub")
+            .WithAutomaticReconnect()
+            .Build();
+
+        timeHub.On<string>(nameof(ITimeClient.ReceiveTime), (time) =>
+        {
+            if (DateTime.TryParse(time, out var dt))
+                formattedTime = dt.ToString("HH:mm:ss");
+            StateHasChanged();
+        });
+
+        await timeHub.StartAsync();
+    }
+
+    private async Task ConnectRoleHub()
+    {
+        isConnecting = true;
+        
+        if (roleHub != null)
+        {
+            await roleHub.DisposeAsync();
+        }
+
+        roleHub = new HubConnectionBuilder()
+            .WithUrl($"{baseApiUrl}/rolehub?role={selectedRole}")
+            .WithAutomaticReconnect()
+            .Build();
+
+        roleHub.On<RoleDataResponse>(nameof(IRoleClient.ReceiveRoleData), (data) =>
+        {
+            roleData = data;
+            roleDataJson = System.Text.Json.JsonSerializer.Serialize(data, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            StateHasChanged();
+        });
+
+        await roleHub.StartAsync();
+        isConnecting = false;
+    }
+
+    private async Task OnRoleChanged(ChangeEventArgs e)
+    {
+        selectedRole = e.Value?.ToString() ?? "Guest";
+        roleData = null;
+        await ConnectRoleHub();
+    }
+
+    public bool IsTimeConnected => timeHub?.State == HubConnectionState.Connected;
+    public bool IsRoleConnected => roleHub?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (timeHub is not null) await timeHub.DisposeAsync();
+        if (roleHub is not null) await roleHub.DisposeAsync();
+    }
+}
